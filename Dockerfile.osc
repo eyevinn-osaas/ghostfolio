@@ -1,0 +1,12 @@
+# Ghostfolio for OSC: the official release image plus an entrypoint that maps OSC
+# conventions (PORT, OSC_HOSTNAME) and hands over to upstream's entrypoint
+# (migrations, seed, server). Pin the tag to the release being published.
+FROM ghostfolio/ghostfolio:3.80.2
+
+COPY --chown=node:node --chmod=755 osc-entrypoint.sh /ghostfolio/osc-entrypoint.sh
+
+ENV PORT=8080
+EXPOSE 8080
+
+USER node
+CMD ["/ghostfolio/osc-entrypoint.sh"]
