@@ -795,6 +795,28 @@ export const personalFinanceTools: Product[] = (
       url: 'https://www.comarch.com/finance/banking/comarch-wealth-management'
     },
     {
+      categories: [
+        'BUDGETING',
+        'CRYPTOCURRENCY',
+        'DIVIDEND_TRACKING',
+        'ETF_TRACKING',
+        'NET_WORTH_TRACKING',
+        'STOCK_TRACKING'
+      ],
+      founded: 2019,
+      hasFreePlan: true,
+      key: 'compiledsanity-personal-finance',
+      languages: ['English'],
+      name: 'CompiledSanity Personal Finance',
+      note: 'License is a perpetual license',
+      origin: 'AU',
+      platforms: ['WEB'],
+      pricingPerYear: 'AUD 12',
+      slogan: 'Understand Your Money. Grow Your Wealth.',
+      updatedAt: '2026-10-08',
+      url: 'https://cspersonalfinance.io'
+    },
+    {
       categories: ['WEALTH_MANAGEMENT'],
       founded: 2019,
       key: 'compound-planning',
@@ -1459,6 +1481,26 @@ export const personalFinanceTools: Product[] = (
       url: 'https://finateka.com'
     },
     {
+      categories: [
+        'BUDGETING',
+        'CRYPTOCURRENCY',
+        'DIVIDEND_TRACKING',
+        'NET_WORTH_TRACKING',
+        'STOCK_TRACKING'
+      ],
+      hasFreePlan: true,
+      hasSelfHostingAbility: false,
+      key: 'finboard',
+      languages: ['Deutsch', 'English', 'Español'],
+      name: 'FinBoard',
+      origin: 'ES',
+      platforms: ['WEB'],
+      pricingPerYear: '€49.90',
+      slogan: 'Your Personal Finance Dashboard',
+      updatedAt: '2026-10-08',
+      url: 'https://finboard.me'
+    },
+    {
       categories: ['NET_WORTH_TRACKING', 'STOCK_TRACKING'],
       founded: 2022,
       key: 'fincake',
@@ -1744,6 +1786,20 @@ export const personalFinanceTools: Product[] = (
       origin: 'DE',
       slogan: 'Volle Kontrolle über deine Investitionen',
       updatedAt: '2025-04-17'
+    },
+    {
+      categories: ['ETF_TRACKING', 'STOCK_TRACKING'],
+      founded: 2025,
+      hasSelfHostingAbility: false,
+      key: 'greenline',
+      languages: ['English'],
+      name: 'Greenline',
+      origin: 'CA',
+      platforms: ['IOS', 'WEB'],
+      regions: ['CA'],
+      slogan: 'See everything you own. In one place.',
+      updatedAt: '2026-11-02',
+      url: 'https://usegreenline.com'
     },
     {
       categories: ['INVESTMENT_RESEARCH'],
@@ -2577,6 +2633,33 @@ export const personalFinanceTools: Product[] = (
       url: 'https://neontra.com'
     },
     {
+      categories: [
+        'BUDGETING',
+        'CRYPTOCURRENCY',
+        'ETF_TRACKING',
+        'NET_WORTH_TRACKING',
+        'STOCK_TRACKING'
+      ],
+      hasFreePlan: true,
+      hasSelfHostingAbility: false,
+      key: 'neto',
+      languages: [
+        'Deutsch',
+        'English',
+        'Español',
+        'Français',
+        'Italiano',
+        'Português'
+      ],
+      name: 'Neto',
+      origin: 'ES',
+      platforms: ['ANDROID', 'IOS'],
+      pricingPerYear: '€49.99',
+      slogan: 'Tus gastos, tus ahorros y tu patrimonio en una sola app',
+      updatedAt: '2026-10-08',
+      url: 'https://netoapp.es'
+    },
+    {
       categories: ['INVESTMENT_RESEARCH', 'STOCK_TRACKING'],
       hasFreePlan: true,
       hasSelfHostingAbility: false,
@@ -2671,6 +2754,27 @@ export const personalFinanceTools: Product[] = (
       slogan: 'Risk analytics. Built on BeFi.',
       updatedAt: '2026-09-23',
       url: 'https://orion.com/advisor-tech/risk-intelligence'
+    },
+    {
+      categories: [
+        'CRYPTOCURRENCY',
+        'ETF_TRACKING',
+        'FAMILY_OFFICE',
+        'NET_WORTH_TRACKING',
+        'STOCK_TRACKING',
+        'WEALTH_MANAGEMENT'
+      ],
+      hasFreePlan: false,
+      hasSelfHostingAbility: false,
+      key: 'ormax',
+      languages: ['English'],
+      name: 'Ormax',
+      origin: 'CY',
+      platforms: ['WEB'],
+      pricingPerYear: '$240',
+      slogan: 'AI Wealth Management',
+      updatedAt: '2026-10-08',
+      url: 'https://ormax.ai'
     },
     {
       categories: [
@@ -3143,6 +3247,14 @@ export const personalFinanceTools: Product[] = (
       slogan: 'Portfolio Management and Reporting Software',
       updatedAt: '2026-09-23',
       url: 'https://www.assetbook.com'
+    },
+    {
+      categories: ['ETF_TRACKING', 'STOCK_TRACKING'],
+      key: 'pure-benchmarks',
+      name: 'Pure Benchmarks',
+      slogan: 'See how your portfolio is actually doing.',
+      updatedAt: '2026-11-02',
+      url: 'https://www.purebenchmarks.com'
     },
     {
       categories: [

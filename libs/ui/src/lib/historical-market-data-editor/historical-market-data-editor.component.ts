@@ -4,7 +4,7 @@ import {
   getDateFormatString,
   getLocale
 } from '@ghostfolio/common/helper';
-import { LineChartItem, User } from '@ghostfolio/common/interfaces';
+import { LineChartItem } from '@ghostfolio/common/interfaces';
 import type { MarketData } from '@ghostfolio/prisma/browser';
 import { DataSource } from '@ghostfolio/prisma/enums';
 import { DataService } from '@ghostfolio/ui/services';
@@ -22,7 +22,8 @@ import {
   Input,
   OnChanges,
   OnInit,
-  Output
+  Output,
+  signal
 } from '@angular/core';
 import { takeUntilDestroyed } from '@angular/core/rxjs-interop';
 import { FormBuilder, ReactiveFormsModule } from '@angular/forms';
@@ -46,7 +47,7 @@ import ms from 'ms';
 import { DeviceDetectorService } from 'ngx-device-detector';
 import { parse as csvToJson } from 'papaparse';
 import { EMPTY } from 'rxjs';
-import { catchError } from 'rxjs/operators';
+import { catchError, finalize } from 'rxjs/operators';
 
 import { GfHistoricalMarketDataEditorDialogComponent } from './historical-market-data-editor-dialog/historical-market-data-editor-dialog.component';
 import { HistoricalMarketDataEditorDialogParams } from './historical-market-data-editor-dialog/interfaces/interfaces';
@@ -70,7 +71,6 @@ export class GfHistoricalMarketDataEditorComponent
   @Input() dataSource: DataSource;
   @Input() dateOfFirstActivity?: Date;
   @Input() symbol: string;
-  @Input() user: User;
 
   @Output() marketDataChanged = new EventEmitter<boolean>();
 
@@ -96,6 +96,7 @@ export class GfHistoricalMarketDataEditorComponent
   protected readonly defaultDateFormat = computed(() =>
     getDateFormatString(this.locale())
   );
+  protected readonly isSubmitting = signal(false);
 
   private readonly destroyRef = inject(DestroyRef);
   private readonly deviceDetectorService = inject(DeviceDetectorService);
@@ -233,8 +234,7 @@ export class GfHistoricalMarketDataEditorComponent
         currency: this.currency,
         dataSource: this.dataSource,
         dateString: `${yearMonth}-${day}`,
-        symbol: this.symbol,
-        user: this.user
+        symbol: this.symbol
       },
       height: this.deviceType() === 'mobile' ? '98vh' : '80vh',
       width: this.deviceType() === 'mobile' ? '100vw' : '50rem'
@@ -260,6 +260,8 @@ export class GfHistoricalMarketDataEditorComponent
         }
       ).data;
 
+      this.isSubmitting.set(true);
+
       this.dataService
         .postMarketData({
           dataSource: this.dataSource,
@@ -274,6 +276,9 @@ export class GfHistoricalMarketDataEditorComponent
               duration: ms('3 seconds')
             });
             return EMPTY;
+          }),
+          finalize(() => {
+            this.isSubmitting.set(false);
           }),
           takeUntilDestroyed(this.destroyRef)
         )

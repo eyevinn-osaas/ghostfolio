@@ -9,36 +9,104 @@ import { DataGatheringService } from './data-gathering.service';
 describe('DataGatheringService', () => {
   let dataGatheringQueue: { addBulk: jest.Mock; clean: jest.Mock };
   let dataGatheringService: DataGatheringService;
-  let dataProviderService: { getHistoricalRaw: jest.Mock };
-  let prismaService: { marketData: { groupBy: jest.Mock; upsert: jest.Mock } };
+  let dataProviderService: {
+    getAssetProfiles: jest.Mock;
+    getHistoricalRaw: jest.Mock;
+  };
+  let prismaService: {
+    marketData: { groupBy: jest.Mock; upsert: jest.Mock };
+    symbolProfile: { upsert: jest.Mock };
+  };
+  let symbolProfileService: { getSymbolProfiles: jest.Mock };
 
   beforeEach(() => {
     dataGatheringQueue = {
       addBulk: jest.fn().mockResolvedValue([]),
       clean: jest.fn().mockResolvedValue([])
     };
-    dataProviderService = { getHistoricalRaw: jest.fn() };
+    dataProviderService = {
+      getAssetProfiles: jest.fn(),
+      getHistoricalRaw: jest.fn()
+    };
     prismaService = {
       marketData: {
         groupBy: jest.fn().mockResolvedValue([]),
         upsert: jest.fn().mockResolvedValue({})
+      },
+      symbolProfile: {
+        upsert: jest.fn().mockResolvedValue({})
       }
+    };
+    symbolProfileService = {
+      getSymbolProfiles: jest.fn().mockResolvedValue([])
     };
 
     dataGatheringService = new DataGatheringService(
-      null,
+      [],
       dataGatheringQueue as any,
       dataProviderService as any,
       null,
       null,
       prismaService as any,
       null,
-      null
+      symbolProfileService as any
     );
   });
 
   afterEach(() => {
     jest.useRealTimers();
+  });
+
+  describe('gatherAssetProfiles', () => {
+    const assetProfileIdentifier = { dataSource: 'YAHOO', symbol: 'VWCE.DE' };
+
+    it('keeps the stored lists if the lists of the asset profile are empty', async () => {
+      dataProviderService.getAssetProfiles.mockResolvedValue({
+        'VWCE.DE': {
+          ...assetProfileIdentifier,
+          countries: [],
+          holdings: [],
+          sectors: []
+        }
+      });
+
+      await dataGatheringService.gatherAssetProfiles([
+        assetProfileIdentifier as any
+      ]);
+
+      const { create, update } =
+        prismaService.symbolProfile.upsert.mock.calls[0][0];
+
+      expect(create.holdings).toEqual([]);
+      expect(update.countries).toBeUndefined();
+      expect(update.holdings).toBeUndefined();
+      expect(update.sectors).toBeUndefined();
+    });
+
+    it('updates the stored lists if the lists of the asset profile have items', async () => {
+      const countries = [{ code: 'US', weight: 1 }];
+      const holdings = [{ name: 'NVIDIA Corp.', weight: 0.05 }];
+      const sectors = [{ name: 'Technology', weight: 1 }];
+
+      dataProviderService.getAssetProfiles.mockResolvedValue({
+        'VWCE.DE': {
+          ...assetProfileIdentifier,
+          countries,
+          holdings,
+          sectors
+        }
+      });
+
+      await dataGatheringService.gatherAssetProfiles([
+        assetProfileIdentifier as any
+      ]);
+
+      const { update } = prismaService.symbolProfile.upsert.mock.calls[0][0];
+
+      expect(update).toEqual(
+        expect.objectContaining({ countries, holdings, sectors })
+      );
+    });
   });
 
   describe('getAssetProfileIdentifiersWithRecentMarketData', () => {
@@ -186,6 +254,47 @@ describe('DataGatheringService', () => {
     });
   });
 
+  describe('gatherSymbol', () => {
+    beforeEach(() => {
+      jest
+        .spyOn(dataGatheringService as any, 'getSymbolsMax')
+        .mockResolvedValue([
+          {
+            dataSource: 'YAHOO',
+            date: parseDate('2026-08-01'),
+            symbol: 'USDEUR'
+          }
+        ]);
+    });
+
+    it('does not apply the cooldown by default', async () => {
+      await dataGatheringService.gatherSymbol({
+        dataSource: 'YAHOO',
+        symbol: 'USDEUR'
+      });
+
+      const [jobs] = dataGatheringQueue.addBulk.mock.calls[0];
+
+      expect(jobs[0].opts.removeOnComplete).toBe(true);
+    });
+
+    it('retains its completed jobs for the duration of a given cooldown', async () => {
+      await dataGatheringService.gatherSymbol({
+        dataSource: 'YAHOO',
+        removeOnComplete: {
+          age: GATHER_HISTORICAL_MARKET_DATA_COOLDOWN_IN_MS / 1000
+        },
+        symbol: 'USDEUR'
+      });
+
+      const [jobs] = dataGatheringQueue.addBulk.mock.calls[0];
+
+      expect(jobs[0].opts.removeOnComplete).toEqual({
+        age: GATHER_HISTORICAL_MARKET_DATA_COOLDOWN_IN_MS / 1000
+      });
+    });
+  });
+
   describe('gatherSymbols', () => {
     it('does not apply the cooldown to a manually triggered gathering', async () => {
       await dataGatheringService.gatherSymbols({
@@ -222,7 +331,29 @@ describe('DataGatheringService', () => {
       expect(prismaService.marketData.upsert).toHaveBeenCalledWith(
         expect.objectContaining({
           create: expect.objectContaining({ isCarriedForward: false }),
-          update: { marketPrice: 100, isCarriedForward: false }
+          update: { isCarriedForward: false, marketPrice: 100, state: 'CLOSE' }
+        })
+      );
+    });
+
+    it('sets the state to INTRADAY for today', async () => {
+      jest.useFakeTimers().setSystemTime(new Date('2026-08-22T14:00:00.000Z'));
+
+      dataProviderService.getHistoricalRaw.mockResolvedValue({
+        'YAHOO-AAPL': {
+          '2026-08-22': { marketPrice: 100 }
+        }
+      });
+
+      await dataGatheringService.gatherSymbolForDate({
+        dataSource: 'YAHOO',
+        date: parseDate('2026-08-22'),
+        symbol: 'AAPL'
+      });
+
+      expect(prismaService.marketData.upsert).toHaveBeenCalledWith(
+        expect.objectContaining({
+          update: expect.objectContaining({ state: 'INTRADAY' })
         })
       );
     });

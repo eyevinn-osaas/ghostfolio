@@ -1,8 +1,3 @@
-import { AccountBalanceService } from '@ghostfolio/api/app/account-balance/account-balance.service';
-import { AccountService } from '@ghostfolio/api/app/account/account.service';
-import { CashDetails } from '@ghostfolio/api/app/account/interfaces/cash-details.interface';
-import { ActivitiesService } from '@ghostfolio/api/app/activities/activities.service';
-import { UserService } from '@ghostfolio/api/app/user/user.service';
 import { getFactor } from '@ghostfolio/api/helper/portfolio.helper';
 import { AccountClusterRiskCurrentInvestment } from '@ghostfolio/api/models/rules/account-cluster-risk/current-investment';
 import { AccountClusterRiskSingleAccount } from '@ghostfolio/api/models/rules/account-cluster-risk/single-account';
@@ -21,11 +16,16 @@ import { RegionalMarketClusterRiskEmergingMarkets } from '@ghostfolio/api/models
 import { RegionalMarketClusterRiskEurope } from '@ghostfolio/api/models/rules/regional-market-cluster-risk/europe';
 import { RegionalMarketClusterRiskJapan } from '@ghostfolio/api/models/rules/regional-market-cluster-risk/japan';
 import { RegionalMarketClusterRiskNorthAmerica } from '@ghostfolio/api/models/rules/regional-market-cluster-risk/north-america';
+import { AccountBalanceService } from '@ghostfolio/api/services/account-balance/account-balance.service';
+import { AccountService } from '@ghostfolio/api/services/account/account.service';
+import { CashDetails } from '@ghostfolio/api/services/account/interfaces/cash-details.interface';
+import { ActivitiesService } from '@ghostfolio/api/services/activities/activities.service';
 import { BenchmarkService } from '@ghostfolio/api/services/benchmark/benchmark.service';
 import { DataProviderService } from '@ghostfolio/api/services/data-provider/data-provider.service';
 import { ExchangeRateDataService } from '@ghostfolio/api/services/exchange-rate-data/exchange-rate-data.service';
 import { I18nService } from '@ghostfolio/api/services/i18n/i18n.service';
 import { SymbolProfileService } from '@ghostfolio/api/services/symbol-profile/symbol-profile.service';
+import { UserService } from '@ghostfolio/api/services/user/user.service';
 import {
   getAnnualizedPerformancePercent,
   getIntervalFromDateRange
@@ -47,6 +47,7 @@ import {
   isAccountExcluded,
   isDraftActivity,
   parseDate,
+  resetHours,
   resolveUserSettings
 } from '@ghostfolio/common/helper';
 import {
@@ -100,11 +101,12 @@ import {
   isBefore,
   isSameMonth,
   isSameYear,
+  min,
   parseISO,
   set,
   startOfDay
 } from 'date-fns';
-import { groupBy } from 'lodash-es';
+import { groupBy, uniq } from 'lodash-es';
 
 import { PortfolioCalculator } from './calculator/portfolio-calculator';
 import { PortfolioCalculatorFactory } from './calculator/portfolio-calculator.factory';
@@ -558,8 +560,13 @@ export class PortfolioService {
 
     const { historicalData } = await portfolioCalculator.getSnapshot();
 
-    const items = historicalData.filter(({ date }) => {
-      return !isBefore(date, startDate) && !isAfter(date, endDate);
+    const items = historicalData.filter((historicalDataItem) => {
+      const date = resetHours(parseDate(historicalDataItem.date));
+
+      return (
+        isAfter(date, resetHours(startDate)) &&
+        !isAfter(date, resetHours(endDate))
+      );
     });
 
     let investments: InvestmentItem[];
@@ -990,15 +997,12 @@ export class PortfolioService {
 
     const {
       activitiesCount,
-      averageInvestment,
-      averageInvestmentWithCurrencyEffect,
       averagePrice,
       currency,
       dateOfFirstActivity,
       dividendInBaseCurrency,
-      dividendYieldPercent: dividendYieldPercentOfSnapshot,
-      dividendYieldPercentWithCurrencyEffect:
-        dividendYieldPercentWithCurrencyEffectOfSnapshot,
+      dividendYieldPercent,
+      dividendYieldPercentWithCurrencyEffect,
       feeInBaseCurrency,
       grossPerformance,
       grossPerformancePercentage,
@@ -1014,34 +1018,6 @@ export class PortfolioService {
       tags
     } = holding;
 
-    // TODO: Remove the block below with the next release, when each cached
-    // portfolio snapshot contains the dividend yield. Then take
-    // dividendYieldPercent and dividendYieldPercentWithCurrencyEffect
-    // directly from the holding and remove averageInvestment and
-    // averageInvestmentWithCurrencyEffect from the properties above
-    const daysInMarket = differenceInDays(
-      new Date(),
-      parseDate(dateOfFirstActivity)
-    );
-
-    const dividendYieldPercent =
-      dividendYieldPercentOfSnapshot ??
-      getAnnualizedPerformancePercent({
-        daysInMarket,
-        netPerformancePercentage: averageInvestment.eq(0)
-          ? new Big(0)
-          : dividendInBaseCurrency.div(averageInvestment)
-      });
-
-    const dividendYieldPercentWithCurrencyEffect =
-      dividendYieldPercentWithCurrencyEffectOfSnapshot ??
-      getAnnualizedPerformancePercent({
-        daysInMarket,
-        netPerformancePercentage: averageInvestmentWithCurrencyEffect.eq(0)
-          ? new Big(0)
-          : dividendInBaseCurrency.div(averageInvestmentWithCurrencyEffect)
-      });
-
     const activitiesOfHolding = activities.filter((activity) => {
       return (
         activity.assetProfile.dataSource === dataSource &&
@@ -1049,12 +1025,11 @@ export class PortfolioService {
       );
     });
 
-    const historicalData = await this.dataProviderService.getHistorical(
-      [{ dataSource, symbol }],
-      'day',
-      parseISO(dateOfFirstActivity, { in: utc }),
-      new Date()
-    );
+    const historicalData = await this.dataProviderService.getHistorical({
+      assetProfileIdentifiers: [{ dataSource, symbol }],
+      from: parseISO(dateOfFirstActivity, { in: utc }),
+      to: new Date()
+    });
 
     const [firstActivity] = activitiesOfHolding;
     const referenceUnitPrice =
@@ -1194,10 +1169,12 @@ export class PortfolioService {
   public async getPerformance({
     dateRange = DEFAULT_DATE_RANGE,
     filters,
+    groupBy,
     userId
   }: {
     dateRange?: DateRange;
     filters?: Filter[];
+    groupBy?: Extract<GroupBy, 'year'>;
     userId: string;
     withExcludedAccounts?: boolean;
   }): Promise<PortfolioPerformanceResponse> {
@@ -1252,10 +1229,22 @@ export class PortfolioService {
 
     const { endDate, startDate } = getIntervalFromDateRange({ dateRange });
 
-    const { chart } = await portfolioCalculator.getPerformance({
-      end: endDate,
-      start: startDate
-    });
+    const { chart: chartOfDateRange } =
+      await portfolioCalculator.getPerformance({
+        end: endDate,
+        start: startDate
+      });
+
+    // An expired portfolio snapshot can end before the date range until its
+    // computation in the background is complete. In this case, the performance
+    // in the date range is not known, but the latest values are available.
+    const latestHistoricalDataItem = historicalData.at(-1);
+
+    const latestValues =
+      latestHistoricalDataItem &&
+      isBefore(parseDate(latestHistoricalDataItem.date), startDate)
+        ? latestHistoricalDataItem
+        : undefined;
 
     const {
       dividendInBaseCurrency,
@@ -1268,17 +1257,29 @@ export class PortfolioService {
       totalInvestment,
       totalInvestmentValueWithCurrencyEffect,
       valueWithCurrencyEffect
-    } = chart?.at(-1) ?? {
+    } = chartOfDateRange?.at(-1) ?? {
       dividendInBaseCurrency: 0,
       dividendInPercentageWithCurrencyEffect: 0,
       netPerformance: 0,
       netPerformanceInPercentage: 0,
       netPerformanceInPercentageWithCurrencyEffect: 0,
       netPerformanceWithCurrencyEffect: 0,
-      netWorth: 0,
-      totalInvestment: 0,
-      valueWithCurrencyEffect: 0
+      netWorth: latestValues?.netWorth ?? 0,
+      totalInvestment: latestValues?.totalInvestment ?? 0,
+      totalInvestmentValueWithCurrencyEffect:
+        latestValues?.totalInvestmentValueWithCurrencyEffect ?? 0,
+      valueWithCurrencyEffect: latestValues?.valueWithCurrencyEffect ?? 0
     };
+
+    const chart =
+      groupBy === 'year'
+        ? await this.getPerformanceByYear({
+            chartOfDateRange,
+            endDate,
+            portfolioCalculator,
+            startDate
+          })
+        : chartOfDateRange;
 
     return {
       chart,
@@ -2050,6 +2051,64 @@ export class PortfolioService {
     return { markets, marketsAdvanced };
   }
 
+  /**
+   * Returns one chart item per calendar year of the date range, dated on
+   * 1 January. Each year stands alone and is not accumulated, so its values
+   * are the same as for the date range of the year (e.g. '2024'), clipped to
+   * the requested date range. The investment is the sum of the year, the other
+   * values are the ones at the end of the year. The first chart item of the
+   * date range carries the values at its start date and belongs to the
+   * previous period, like 31 December for a calendar year, so the years before
+   * the first activity have no chart item.
+   */
+  private async getPerformanceByYear({
+    chartOfDateRange,
+    endDate,
+    portfolioCalculator,
+    startDate
+  }: {
+    chartOfDateRange: HistoricalDataItem[];
+    endDate: Date;
+    portfolioCalculator: PortfolioCalculator;
+    startDate: Date;
+  }): Promise<HistoricalDataItem[]> {
+    const chart: HistoricalDataItem[] = [];
+
+    const years = uniq(
+      chartOfDateRange.slice(1).map(({ date }) => {
+        return date.substring(0, 4);
+      })
+    );
+
+    for (const [index, year] of years.entries()) {
+      const { endDate: endDateOfYear, startDate: startDateOfYear } =
+        getIntervalFromDateRange({ dateRange: year });
+
+      const { chart: chartOfYear } = await portfolioCalculator.getPerformance({
+        end: min([endDate, endDateOfYear]),
+        start: index === 0 ? startDate : startDateOfYear
+      });
+
+      let investmentValueWithCurrencyEffect = new Big(0);
+
+      for (const historicalDataItem of chartOfYear.slice(1)) {
+        investmentValueWithCurrencyEffect =
+          investmentValueWithCurrencyEffect.plus(
+            historicalDataItem.investmentValueWithCurrencyEffect ?? 0
+          );
+      }
+
+      chart.push({
+        ...chartOfYear.at(-1),
+        date: `${year}-01-01`,
+        investmentValueWithCurrencyEffect:
+          investmentValueWithCurrencyEffect.toNumber()
+      });
+    }
+
+    return chart;
+  }
+
   private getReportStatistics(
     evaluatedRules: PortfolioReportRule[]
   ): PortfolioReportResponse['xRay']['statistics'] {
@@ -2247,11 +2306,9 @@ export class PortfolioService {
       activityCount: activities.filter(({ type }) => {
         return ['BUY', 'SELL'].includes(type);
       }).length,
-      // TODO: Remove the fallback to 0 with the next release, when each
-      // cached portfolio snapshot contains the dividend yield
-      dividendYieldPercent: dividendYieldPercent?.toNumber() ?? 0,
+      dividendYieldPercent: dividendYieldPercent.toNumber(),
       dividendYieldPercentWithCurrencyEffect:
-        dividendYieldPercentWithCurrencyEffect?.toNumber() ?? 0,
+        dividendYieldPercentWithCurrencyEffect.toNumber(),
       emergencyFund: {
         assets: emergencyFundHoldingsValueInBaseCurrency,
         cash: totalEmergencyFund
@@ -2361,6 +2418,9 @@ export class PortfolioService {
       return type;
     });
 
+    const isFilteredByAssetClassOtherThanLiquidity =
+      this.activitiesService.isFilteredByAssetClassOtherThanLiquidity(filters);
+
     let currentAccounts: (AccountWithBalance & {
       Order?: Order[];
       platform?: Platform;
@@ -2408,15 +2468,17 @@ export class PortfolioService {
       });
 
       if (account) {
-        // The cash balance is not part of a holding and would distort the value
-        // and thus the allocation per account and platform
-        const balanceInBaseCurrency = filterBySymbol
-          ? 0
-          : this.exchangeRateDataService.toCurrency(
-              account.balance,
-              account.currency,
-              userCurrency
-            );
+        // The cash balance is not part of a holding or of an asset class other
+        // than liquidity and would distort the value and thus the allocation
+        // per account and platform
+        const balanceInBaseCurrency =
+          filterBySymbol || isFilteredByAssetClassOtherThanLiquidity
+            ? 0
+            : this.exchangeRateDataService.toCurrency(
+                account.balance,
+                account.currency,
+                userCurrency
+              );
 
         accounts[currentAccountId] = {
           balance: account.balance,

@@ -1,15 +1,16 @@
-import { AccountService } from '@ghostfolio/api/app/account/account.service';
-import { CashDetails } from '@ghostfolio/api/app/account/interfaces/cash-details.interface';
-import { ActivitiesService } from '@ghostfolio/api/app/activities/activities.service';
 import { PortfolioCalculator } from '@ghostfolio/api/app/portfolio/calculator/portfolio-calculator';
 import { userDummyData } from '@ghostfolio/api/app/portfolio/calculator/portfolio-calculator-test-utils';
 import { PortfolioCalculatorFactory } from '@ghostfolio/api/app/portfolio/calculator/portfolio-calculator.factory';
 import { CurrentRateService } from '@ghostfolio/api/app/portfolio/current-rate.service';
-import { UserService } from '@ghostfolio/api/app/user/user.service';
+import { AccountBalanceService } from '@ghostfolio/api/services/account-balance/account-balance.service';
+import { AccountService } from '@ghostfolio/api/services/account/account.service';
+import { CashDetails } from '@ghostfolio/api/services/account/interfaces/cash-details.interface';
+import { ActivitiesService } from '@ghostfolio/api/services/activities/activities.service';
 import { ConfigurationService } from '@ghostfolio/api/services/configuration/configuration.service';
 import { DataProviderService } from '@ghostfolio/api/services/data-provider/data-provider.service';
 import { ExchangeRateDataService } from '@ghostfolio/api/services/exchange-rate-data/exchange-rate-data.service';
 import { SymbolProfileService } from '@ghostfolio/api/services/symbol-profile/symbol-profile.service';
+import { UserService } from '@ghostfolio/api/services/user/user.service';
 import {
   TAG_ID_EMERGENCY_FUND,
   TAG_ID_EXCLUDE_FROM_ANALYSIS,
@@ -22,15 +23,17 @@ import {
   Filter,
   PortfolioSummary
 } from '@ghostfolio/common/interfaces';
-import { AccountWithBalance } from '@ghostfolio/common/types';
+import { AccountWithBalance, DateRange } from '@ghostfolio/common/types';
 
 import { AssetClass, DataSource, Prisma } from '@prisma/client';
 import { Big } from 'big.js';
+import { endOfDay } from 'date-fns';
 import { randomUUID } from 'node:crypto';
 
 import { PortfolioService } from './portfolio.service';
 
 describe('PortfolioService', () => {
+  let accountBalanceService: AccountBalanceService;
   let accountService: AccountService;
   let activitiesService: ActivitiesService;
   let configurationService: ConfigurationService;
@@ -58,6 +61,12 @@ describe('PortfolioService', () => {
       null,
       null,
       null,
+      null
+    );
+
+    accountBalanceService = new AccountBalanceService(
+      null,
+      exchangeRateDataService,
       null
     );
 
@@ -113,7 +122,7 @@ describe('PortfolioService', () => {
     );
 
     portfolioService = new PortfolioService(
-      null,
+      accountBalanceService,
       accountService,
       activitiesService,
       null,
@@ -833,6 +842,443 @@ describe('PortfolioService', () => {
     });
   });
 
+  describe('getInvestments', () => {
+    afterEach(() => {
+      jest.useRealTimers();
+    });
+
+    it.each(['2025', 'ytd'] as DateRange[])(
+      'should exclude the investment of the start date of the date range %s',
+      async (dateRange) => {
+        jest.useFakeTimers().setSystemTime(parseDate('2025-06-15').getTime());
+
+        jest
+          .spyOn(activitiesService, 'getActivitiesForPortfolioCalculator')
+          .mockResolvedValue({ activities: [{} as Activity], count: 1 });
+
+        jest
+          .spyOn(portfolioCalculatorFactory, 'createCalculator')
+          .mockReturnValue({
+            getSnapshot: jest.fn().mockResolvedValue({
+              historicalData: [
+                { date: '2024-12-31', investmentValueWithCurrencyEffect: 100 },
+                { date: '2025-01-01', investmentValueWithCurrencyEffect: 200 }
+              ]
+            })
+          } as unknown as PortfolioCalculator);
+
+        jest.spyOn(userService, 'user').mockResolvedValue({
+          id: userDummyData.id,
+          settings: {
+            settings: {
+              baseCurrency: 'CHF'
+            }
+          }
+        } as unknown as Awaited<ReturnType<typeof userService.user>>);
+
+        const { investments } = await portfolioService.getInvestments({
+          dateRange,
+          userId: userDummyData.id
+        });
+
+        expect(investments).toEqual([{ date: '2025-01-01', investment: 200 }]);
+      }
+    );
+  });
+
+  describe('getPerformance', () => {
+    let getPerformanceOfCalculator: jest.Mock;
+
+    beforeEach(() => {
+      jest.useFakeTimers().setSystemTime(parseDate('2025-06-15').getTime());
+
+      getPerformanceOfCalculator = jest.fn();
+
+      jest
+        .spyOn(accountBalanceService, 'getAccountBalanceItems')
+        .mockResolvedValue([]);
+
+      jest
+        .spyOn(activitiesService, 'getActivitiesForPortfolioCalculator')
+        .mockResolvedValue({ activities: [{} as Activity], count: 1 });
+
+      jest
+        .spyOn(portfolioCalculatorFactory, 'createCalculator')
+        .mockReturnValue({
+          getPerformance: getPerformanceOfCalculator,
+          getSnapshot: jest.fn().mockResolvedValue({
+            errors: [],
+            hasErrors: false,
+            historicalData: [{ date: '2023-03-01' }]
+          })
+        } as unknown as PortfolioCalculator);
+
+      jest.spyOn(userService, 'user').mockResolvedValue({
+        id: userDummyData.id,
+        settings: {
+          settings: {
+            baseCurrency: 'CHF'
+          }
+        }
+      } as unknown as Awaited<ReturnType<typeof userService.user>>);
+    });
+
+    afterEach(() => {
+      jest.useRealTimers();
+    });
+
+    it('should return the chart of the date range without a group', async () => {
+      getPerformanceOfCalculator.mockResolvedValueOnce({
+        chart: [
+          { date: '2023-03-01', netPerformance: 0 },
+          { date: '2025-06-15', netPerformance: 600 }
+        ]
+      });
+
+      const { chart, dateOfFirstActivity, performance } =
+        await portfolioService.getPerformance({
+          dateRange: 'max',
+          userId: userDummyData.id
+        });
+
+      expect(getPerformanceOfCalculator).toHaveBeenCalledTimes(1);
+      expect(getPerformanceOfCalculator).toHaveBeenCalledWith({
+        end: endOfDay(parseDate('2025-06-15')),
+        start: new Date(0)
+      });
+      expect(chart).toEqual([
+        { date: '2023-03-01', netPerformance: 0 },
+        { date: '2025-06-15', netPerformance: 600 }
+      ]);
+      expect(dateOfFirstActivity).toEqual(parseDate('2023-03-01'));
+      expect(performance.netPerformance).toBe(600);
+    });
+
+    it('should return one chart item per calendar year since the first activity when grouped by year', async () => {
+      getPerformanceOfCalculator
+        .mockResolvedValueOnce({
+          chart: [
+            { date: '2023-03-01', netPerformance: 0 },
+            { date: '2023-12-31', netPerformance: 100 },
+            { date: '2024-12-31', netPerformance: 300 },
+            { date: '2025-06-15', netPerformance: 600 }
+          ]
+        })
+        .mockResolvedValueOnce({
+          chart: [
+            { date: '2023-03-01', netPerformance: 0 },
+            { date: '2023-12-31', netPerformance: 100 }
+          ]
+        })
+        .mockResolvedValueOnce({
+          chart: [
+            { date: '2023-12-31', netPerformance: 0 },
+            { date: '2024-12-31', netPerformance: 200 }
+          ]
+        })
+        .mockResolvedValueOnce({
+          chart: [
+            { date: '2024-12-31', netPerformance: 0 },
+            { date: '2025-06-15', netPerformance: 300 }
+          ]
+        });
+
+      const { chart, performance } = await portfolioService.getPerformance({
+        dateRange: 'max',
+        groupBy: 'year',
+        userId: userDummyData.id
+      });
+
+      expect(getPerformanceOfCalculator).toHaveBeenCalledTimes(4);
+      expect(getPerformanceOfCalculator).toHaveBeenNthCalledWith(2, {
+        end: endOfDay(parseDate('2023-12-31')),
+        start: new Date(0)
+      });
+      expect(getPerformanceOfCalculator).toHaveBeenNthCalledWith(3, {
+        end: endOfDay(parseDate('2024-12-31')),
+        start: endOfDay(parseDate('2023-12-31'))
+      });
+      expect(getPerformanceOfCalculator).toHaveBeenNthCalledWith(4, {
+        end: endOfDay(parseDate('2025-06-15')),
+        start: endOfDay(parseDate('2024-12-31'))
+      });
+      expect(chart).toEqual([
+        {
+          date: '2023-01-01',
+          investmentValueWithCurrencyEffect: 0,
+          netPerformance: 100
+        },
+        {
+          date: '2024-01-01',
+          investmentValueWithCurrencyEffect: 0,
+          netPerformance: 200
+        },
+        {
+          date: '2025-01-01',
+          investmentValueWithCurrencyEffect: 0,
+          netPerformance: 300
+        }
+      ]);
+      expect(performance.netPerformance).toBe(600);
+    });
+
+    it('should return the same chart item for a calendar year as for its date range when grouped by year', async () => {
+      getPerformanceOfCalculator
+        .mockResolvedValueOnce({
+          chart: [
+            { date: '2023-12-31', netPerformance: 0 },
+            { date: '2024-12-31', netPerformance: 200 }
+          ]
+        })
+        .mockResolvedValueOnce({
+          chart: [
+            { date: '2023-12-31', netPerformance: 0 },
+            { date: '2024-12-31', netPerformance: 200 }
+          ]
+        });
+
+      const { chart, performance } = await portfolioService.getPerformance({
+        dateRange: '2024',
+        groupBy: 'year',
+        userId: userDummyData.id
+      });
+
+      expect(getPerformanceOfCalculator).toHaveBeenCalledTimes(2);
+      expect(getPerformanceOfCalculator).toHaveBeenNthCalledWith(
+        2,
+        getPerformanceOfCalculator.mock.calls[0][0]
+      );
+      expect(chart).toEqual([
+        {
+          date: '2024-01-01',
+          investmentValueWithCurrencyEffect: 0,
+          netPerformance: 200
+        }
+      ]);
+      expect(performance.netPerformance).toBe(200);
+    });
+
+    it('should clip the first calendar year to the date range when grouped by year', async () => {
+      getPerformanceOfCalculator
+        .mockResolvedValueOnce({
+          chart: [
+            { date: '2024-06-15', netPerformance: 0 },
+            { date: '2024-12-31', netPerformance: 100 },
+            { date: '2025-06-15', netPerformance: 300 }
+          ]
+        })
+        .mockResolvedValueOnce({
+          chart: [
+            { date: '2024-06-15', netPerformance: 0 },
+            { date: '2024-12-31', netPerformance: 100 }
+          ]
+        })
+        .mockResolvedValueOnce({
+          chart: [
+            { date: '2024-12-31', netPerformance: 0 },
+            { date: '2025-06-15', netPerformance: 200 }
+          ]
+        });
+
+      const { chart, performance } = await portfolioService.getPerformance({
+        dateRange: '1y',
+        groupBy: 'year',
+        userId: userDummyData.id
+      });
+
+      expect(getPerformanceOfCalculator).toHaveBeenCalledTimes(3);
+      expect(getPerformanceOfCalculator).toHaveBeenNthCalledWith(2, {
+        end: endOfDay(parseDate('2024-12-31')),
+        start: parseDate('2024-06-15')
+      });
+      expect(getPerformanceOfCalculator).toHaveBeenNthCalledWith(3, {
+        end: endOfDay(parseDate('2025-06-15')),
+        start: endOfDay(parseDate('2024-12-31'))
+      });
+      expect(chart).toEqual([
+        {
+          date: '2024-01-01',
+          investmentValueWithCurrencyEffect: 0,
+          netPerformance: 100
+        },
+        {
+          date: '2025-01-01',
+          investmentValueWithCurrencyEffect: 0,
+          netPerformance: 200
+        }
+      ]);
+      expect(performance.netPerformance).toBe(300);
+    });
+
+    it('should start the first calendar year at the start date of the date range on 1 January when grouped by year', async () => {
+      jest.setSystemTime(parseDate('2026-01-01').getTime());
+
+      getPerformanceOfCalculator
+        .mockResolvedValueOnce({
+          chart: [
+            { date: '2025-01-01', netPerformance: 0 },
+            { date: '2025-12-31', netPerformance: 100 },
+            { date: '2026-01-01', netPerformance: 150 }
+          ]
+        })
+        .mockResolvedValueOnce({
+          chart: [
+            { date: '2025-01-01', netPerformance: 0 },
+            { date: '2025-12-31', netPerformance: 100 }
+          ]
+        })
+        .mockResolvedValueOnce({
+          chart: [
+            { date: '2025-12-31', netPerformance: 0 },
+            { date: '2026-01-01', netPerformance: 50 }
+          ]
+        });
+
+      const { chart } = await portfolioService.getPerformance({
+        dateRange: '1y',
+        groupBy: 'year',
+        userId: userDummyData.id
+      });
+
+      expect(getPerformanceOfCalculator).toHaveBeenCalledTimes(3);
+      expect(getPerformanceOfCalculator).toHaveBeenNthCalledWith(1, {
+        end: endOfDay(parseDate('2026-01-01')),
+        start: parseDate('2025-01-01')
+      });
+      expect(getPerformanceOfCalculator).toHaveBeenNthCalledWith(2, {
+        end: endOfDay(parseDate('2025-12-31')),
+        start: parseDate('2025-01-01')
+      });
+      expect(getPerformanceOfCalculator).toHaveBeenNthCalledWith(3, {
+        end: endOfDay(parseDate('2026-01-01')),
+        start: endOfDay(parseDate('2025-12-31'))
+      });
+      expect(chart).toEqual([
+        {
+          date: '2025-01-01',
+          investmentValueWithCurrencyEffect: 0,
+          netPerformance: 100
+        },
+        {
+          date: '2026-01-01',
+          investmentValueWithCurrencyEffect: 0,
+          netPerformance: 50
+        }
+      ]);
+    });
+
+    it('should add up the investment of each calendar year when grouped by year', async () => {
+      getPerformanceOfCalculator
+        .mockResolvedValueOnce({
+          chart: [
+            { date: '2023-12-31', investmentValueWithCurrencyEffect: 0 },
+            { date: '2024-03-01', investmentValueWithCurrencyEffect: 1000 },
+            { date: '2024-12-31', investmentValueWithCurrencyEffect: 300 },
+            { date: '2025-06-15', investmentValueWithCurrencyEffect: 200 }
+          ]
+        })
+        .mockResolvedValueOnce({
+          chart: [
+            { date: '2023-12-31', investmentValueWithCurrencyEffect: 0 },
+            { date: '2024-03-01', investmentValueWithCurrencyEffect: 1000 },
+            { date: '2024-12-31', investmentValueWithCurrencyEffect: 300 }
+          ]
+        })
+        .mockResolvedValueOnce({
+          chart: [
+            { date: '2024-12-31', investmentValueWithCurrencyEffect: 300 },
+            { date: '2025-06-15', investmentValueWithCurrencyEffect: 200 }
+          ]
+        });
+
+      const { chart } = await portfolioService.getPerformance({
+        dateRange: 'max',
+        groupBy: 'year',
+        userId: userDummyData.id
+      });
+
+      expect(chart).toEqual([
+        { date: '2024-01-01', investmentValueWithCurrencyEffect: 1300 },
+        { date: '2025-01-01', investmentValueWithCurrencyEffect: 200 }
+      ]);
+    });
+
+    describe('with an empty chart of the date range', () => {
+      const historicalData = [
+        { date: '2023-03-01' },
+        {
+          date: '2025-06-12',
+          dividendInBaseCurrency: 50,
+          netPerformance: 600,
+          netPerformanceInPercentage: 0.6,
+          netPerformanceInPercentageWithCurrencyEffect: 0.5,
+          netPerformanceWithCurrencyEffect: 500,
+          netWorth: 2000,
+          totalInvestment: 1000,
+          totalInvestmentValueWithCurrencyEffect: 1100,
+          valueWithCurrencyEffect: 1600
+        }
+      ];
+
+      beforeEach(() => {
+        getPerformanceOfCalculator.mockResolvedValueOnce({ chart: [] });
+
+        jest
+          .spyOn(portfolioCalculatorFactory, 'createCalculator')
+          .mockReturnValue({
+            getPerformance: getPerformanceOfCalculator,
+            getSnapshot: jest.fn().mockResolvedValue({
+              historicalData,
+              errors: [],
+              hasErrors: false
+            })
+          } as unknown as PortfolioCalculator);
+      });
+
+      it('should return the latest values of the portfolio snapshot without any performance when the portfolio snapshot ends before the date range', async () => {
+        const { chart, performance } = await portfolioService.getPerformance({
+          dateRange: '1d',
+          userId: userDummyData.id
+        });
+
+        expect(chart).toEqual([]);
+        expect(performance).toEqual({
+          currentNetWorth: 2000,
+          currentValueInBaseCurrency: 1600,
+          dividendInBaseCurrency: 0,
+          dividendPercentageWithCurrencyEffect: 0,
+          netPerformance: 0,
+          netPerformancePercentage: 0,
+          netPerformancePercentageWithCurrencyEffect: 0,
+          netPerformanceWithCurrencyEffect: 0,
+          totalInvestment: 1000,
+          totalInvestmentValueWithCurrencyEffect: 1100
+        });
+      });
+
+      it('should return no values when the portfolio snapshot ends after the date range', async () => {
+        const { chart, performance } = await portfolioService.getPerformance({
+          dateRange: '2022',
+          userId: userDummyData.id
+        });
+
+        expect(chart).toEqual([]);
+        expect(performance).toEqual({
+          currentNetWorth: 0,
+          currentValueInBaseCurrency: 0,
+          dividendInBaseCurrency: 0,
+          dividendPercentageWithCurrencyEffect: 0,
+          netPerformance: 0,
+          netPerformancePercentage: 0,
+          netPerformancePercentageWithCurrencyEffect: 0,
+          netPerformanceWithCurrencyEffect: 0,
+          totalInvestment: 0,
+          totalInvestmentValueWithCurrencyEffect: 0
+        });
+      });
+    });
+  });
+
   describe('getSummary', () => {
     const getSummary = (args: object) => {
       return (
@@ -870,6 +1316,8 @@ describe('PortfolioService', () => {
         getLiabilitiesInBaseCurrency: jest.fn().mockResolvedValue(new Big(0)),
         getSnapshot: jest.fn().mockResolvedValue({
           currentValueInBaseCurrency: new Big(3000),
+          dividendYieldPercent: new Big(0),
+          dividendYieldPercentWithCurrencyEffect: new Big(0),
           totalCashInBaseCurrency: new Big(1000),
           totalInvestment: new Big(2000),
           totalInvestmentWithCurrencyEffect: new Big(2000)
@@ -1127,7 +1575,11 @@ describe('PortfolioService', () => {
           getValueOfAccountsAndPlatforms: (aArgs: object) => Promise<{
             accounts: Record<
               string,
-              { quantity?: number; valueInBaseCurrency: number }
+              {
+                balance: number;
+                quantity?: number;
+                valueInBaseCurrency: number;
+              }
             >;
             platforms: Record<string, { valueInBaseCurrency: number }>;
           }>;
@@ -1346,6 +1798,83 @@ describe('PortfolioService', () => {
       // 1 * 10 (activity), without the balance of 100
       expect(accounts[account.id].valueInBaseCurrency).toBe(10);
       expect(platforms[account.platformId].valueInBaseCurrency).toBe(10);
+    });
+
+    it('should exclude the cash balance if the activities are filtered by an asset class other than liquidity', async () => {
+      const { accounts, platforms } = await getValueOfAccountsAndPlatforms({
+        activities: [
+          {
+            account,
+            accountId: account.id,
+            assetProfile: { dataSource: DataSource.YAHOO, symbol: 'AAPL' },
+            quantity: 1,
+            type: 'BUY'
+          }
+        ],
+        filters: [{ id: AssetClass.EQUITY, type: 'ASSET_CLASS' }],
+        portfolioItemsNow: {
+          'YAHOO-AAPL': { marketPriceInBaseCurrency: 10 }
+        },
+        userCurrency: 'USD',
+        userId: userDummyData.id
+      });
+
+      expect(accounts[account.id].balance).toBe(100);
+
+      // 1 * 10 (activity), without the balance of 100
+      expect(accounts[account.id].valueInBaseCurrency).toBe(10);
+      expect(platforms[account.platformId].valueInBaseCurrency).toBe(10);
+    });
+
+    it('should include the cash balance if the activities are filtered by asset classes including liquidity', async () => {
+      const { accounts, platforms } = await getValueOfAccountsAndPlatforms({
+        activities: [
+          {
+            account,
+            accountId: account.id,
+            assetProfile: { dataSource: DataSource.YAHOO, symbol: 'AAPL' },
+            quantity: 1,
+            type: 'BUY'
+          }
+        ],
+        filters: [
+          { id: AssetClass.EQUITY, type: 'ASSET_CLASS' },
+          { id: AssetClass.LIQUIDITY, type: 'ASSET_CLASS' }
+        ],
+        portfolioItemsNow: {
+          'YAHOO-AAPL': { marketPriceInBaseCurrency: 10 }
+        },
+        userCurrency: 'USD',
+        userId: userDummyData.id
+      });
+
+      // 100 (balance) + 1 * 10 (activity)
+      expect(accounts[account.id].valueInBaseCurrency).toBe(110);
+      expect(platforms[account.platformId].valueInBaseCurrency).toBe(110);
+    });
+
+    it('should include the cash balance if the activities are filtered by a tag', async () => {
+      const { accounts, platforms } = await getValueOfAccountsAndPlatforms({
+        activities: [
+          {
+            account,
+            accountId: account.id,
+            assetProfile: { dataSource: DataSource.YAHOO, symbol: 'AAPL' },
+            quantity: 1,
+            type: 'BUY'
+          }
+        ],
+        filters: [{ id: randomUUID(), type: 'TAG' }],
+        portfolioItemsNow: {
+          'YAHOO-AAPL': { marketPriceInBaseCurrency: 10 }
+        },
+        userCurrency: 'USD',
+        userId: userDummyData.id
+      });
+
+      // 100 (balance) + 1 * 10 (activity)
+      expect(accounts[account.id].valueInBaseCurrency).toBe(110);
+      expect(platforms[account.platformId].valueInBaseCurrency).toBe(110);
     });
 
     it('should not accumulate rounding errors of the balances of accounts sharing a platform', async () => {

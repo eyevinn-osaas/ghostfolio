@@ -1,8 +1,8 @@
-import { GfInvestmentChartComponent } from '@ghostfolio/client/components/investment-chart/investment-chart.component';
 import { UserService } from '@ghostfolio/client/services/user/user.service';
 import {
   DEFAULT_DATE_RANGE,
   DEFAULT_PAGE_SIZE,
+  NUMERICAL_PRECISION_THRESHOLD_3_FIGURES,
   NUMERICAL_PRECISION_THRESHOLD_4_FIGURES
 } from '@ghostfolio/common/config';
 import { CreateAccountBalanceDto } from '@ghostfolio/common/dtos';
@@ -23,6 +23,7 @@ import { GfDialogFooterComponent } from '@ghostfolio/ui/dialog-footer';
 import { GfDialogHeaderComponent } from '@ghostfolio/ui/dialog-header';
 import { GfHoldingsTableComponent } from '@ghostfolio/ui/holdings-table';
 import { translate } from '@ghostfolio/ui/i18n';
+import { GfInvestmentChartComponent } from '@ghostfolio/ui/investment-chart';
 import { DataService } from '@ghostfolio/ui/services';
 import { GfTagsSelectorComponent } from '@ghostfolio/ui/tags-selector';
 import { GfValueComponent } from '@ghostfolio/ui/value';
@@ -33,9 +34,9 @@ import {
   Component,
   DestroyRef,
   inject,
-  OnInit
+  OnInit,
+  signal
 } from '@angular/core';
-import { CUSTOM_ELEMENTS_SCHEMA } from '@angular/core';
 import { takeUntilDestroyed } from '@angular/core/rxjs-interop';
 import { MatButtonModule } from '@angular/material/button';
 import { MAT_DIALOG_DATA, MatDialogRef } from '@angular/material/dialog';
@@ -57,7 +58,7 @@ import {
 } from 'ionicons/icons';
 import { isNumber } from 'lodash-es';
 import { NgxSkeletonLoaderModule } from 'ngx-skeleton-loader';
-import { filter, forkJoin } from 'rxjs';
+import { filter, finalize, forkJoin } from 'rxjs';
 
 import {
   AccountDetailDialogParams,
@@ -82,7 +83,6 @@ import {
     MatTabsModule,
     NgxSkeletonLoaderModule
   ],
-  schemas: [CUSTOM_ELEMENTS_SCHEMA],
   selector: 'gf-account-detail-dialog',
   styleUrls: ['./account-detail-dialog.component.scss'],
   templateUrl: 'account-detail-dialog.html'
@@ -105,7 +105,12 @@ export class GfAccountDetailDialogComponent implements OnInit {
   protected interestInBaseCurrencyPrecision = 2;
   protected isLoading = true;
   protected isLoadingChart: boolean;
+  protected readonly isSubmitting = signal(false);
   protected name: string | null;
+  protected netPerformancePercentageWithCurrencyEffect: number;
+  protected netPerformancePercentageWithCurrencyEffectPrecision = 2;
+  protected netPerformanceWithCurrencyEffect: number;
+  protected netPerformanceWithCurrencyEffectPrecision = 2;
   protected pageIndex = 0;
   protected pageSize = DEFAULT_PAGE_SIZE;
   protected platformName: string;
@@ -168,9 +173,19 @@ export class GfAccountDetailDialogComponent implements OnInit {
   }
 
   protected onAddAccountBalance(accountBalance: CreateAccountBalanceDto) {
+    this.isSubmitting.set(true);
+
     this.dataService
-      .postAccountBalance(accountBalance)
-      .pipe(takeUntilDestroyed(this.destroyRef))
+      .postAccountBalance({
+        accountBalance,
+        accountId: this.data.accountId
+      })
+      .pipe(
+        finalize(() => {
+          this.isSubmitting.set(false);
+        }),
+        takeUntilDestroyed(this.destroyRef)
+      )
       .subscribe(() => {
         this.initialize();
 
@@ -190,7 +205,7 @@ export class GfAccountDetailDialogComponent implements OnInit {
 
   protected onDeleteAccountBalance(aId: string) {
     this.dataService
-      .deleteAccountBalance(aId)
+      .deleteAccountBalance({ accountId: this.data.accountId, id: aId })
       .pipe(takeUntilDestroyed(this.destroyRef))
       .subscribe(() => {
         this.initialize();
@@ -356,9 +371,38 @@ export class GfAccountDetailDialogComponent implements OnInit {
     }).subscribe({
       error: () => {
         this.isLoadingChart = false;
+
+        this.changeDetectorRef.markForCheck();
       },
       next: ({ accountBalances, portfolioPerformance }) => {
         this.accountBalances = accountBalances.balances;
+
+        const {
+          netPerformancePercentageWithCurrencyEffect,
+          netPerformanceWithCurrencyEffect
+        } = portfolioPerformance.performance;
+
+        this.netPerformancePercentageWithCurrencyEffect =
+          netPerformancePercentageWithCurrencyEffect;
+
+        if (
+          this.data.deviceType === 'mobile' &&
+          this.netPerformancePercentageWithCurrencyEffect >=
+            NUMERICAL_PRECISION_THRESHOLD_3_FIGURES
+        ) {
+          this.netPerformancePercentageWithCurrencyEffectPrecision = 0;
+        }
+
+        this.netPerformanceWithCurrencyEffect =
+          netPerformanceWithCurrencyEffect;
+
+        if (
+          this.data.deviceType === 'mobile' &&
+          this.netPerformanceWithCurrencyEffect >=
+            NUMERICAL_PRECISION_THRESHOLD_4_FIGURES
+        ) {
+          this.netPerformanceWithCurrencyEffectPrecision = 0;
+        }
 
         if (
           portfolioPerformance.chart &&

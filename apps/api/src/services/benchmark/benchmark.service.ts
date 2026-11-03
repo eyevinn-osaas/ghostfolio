@@ -1,8 +1,8 @@
-import { RedisCacheService } from '@ghostfolio/api/app/redis-cache/redis-cache.service';
 import { DataProviderService } from '@ghostfolio/api/services/data-provider/data-provider.service';
 import { MarketDataService } from '@ghostfolio/api/services/market-data/market-data.service';
 import { PrismaService } from '@ghostfolio/api/services/prisma/prisma.service';
 import { PropertyService } from '@ghostfolio/api/services/property/property.service';
+import { RedisCacheService } from '@ghostfolio/api/services/redis-cache/redis-cache.service';
 import { SymbolProfileService } from '@ghostfolio/api/services/symbol-profile/symbol-profile.service';
 import {
   CACHE_TTL_INFINITE,
@@ -335,5 +335,7 @@ export class BenchmarkService {
       key: PROPERTY_BENCHMARKS,
       value: JSON.stringify(benchmarks)
     });
+
+    await this.redisCacheService.remove(this.CACHE_KEY_BENCHMARKS);
   }
 }

@@ -6,13 +6,14 @@ import {
 import { PortfolioCalculatorFactory } from '@ghostfolio/api/app/portfolio/calculator/portfolio-calculator.factory';
 import { CurrentRateService } from '@ghostfolio/api/app/portfolio/current-rate.service';
 import { CurrentRateServiceMock } from '@ghostfolio/api/app/portfolio/current-rate.service.mock';
-import { RedisCacheService } from '@ghostfolio/api/app/redis-cache/redis-cache.service';
-import { RedisCacheServiceMock } from '@ghostfolio/api/app/redis-cache/redis-cache.service.mock';
 import { ConfigurationService } from '@ghostfolio/api/services/configuration/configuration.service';
 import { ExchangeRateDataService } from '@ghostfolio/api/services/exchange-rate-data/exchange-rate-data.service';
 import { ExchangeRateDataServiceMock } from '@ghostfolio/api/services/exchange-rate-data/exchange-rate-data.service.mock';
 import { PortfolioSnapshotService } from '@ghostfolio/api/services/queues/portfolio-snapshot/portfolio-snapshot.service';
 import { PortfolioSnapshotServiceMock } from '@ghostfolio/api/services/queues/portfolio-snapshot/portfolio-snapshot.service.mock';
+import { RedisCacheService } from '@ghostfolio/api/services/redis-cache/redis-cache.service';
+import { RedisCacheServiceMock } from '@ghostfolio/api/services/redis-cache/redis-cache.service.mock';
+import { getIntervalFromDateRange } from '@ghostfolio/common/calculation-helper';
 import { parseDate } from '@ghostfolio/common/helper';
 import { PerformanceCalculationType } from '@ghostfolio/common/types/performance-calculation-type.type';
 
@@ -37,7 +38,7 @@ jest.mock(
   }
 );
 
-jest.mock('@ghostfolio/api/app/redis-cache/redis-cache.service', () => {
+jest.mock('@ghostfolio/api/services/redis-cache/redis-cache.service', () => {
   return {
     RedisCacheService: jest.fn().mockImplementation(() => {
       return RedisCacheServiceMock;
@@ -168,6 +169,7 @@ describe('PortfolioCalculator', () => {
             },
             netPerformanceWithCurrencyEffectMap: {
               '1d': new Big('-556.443324'),
+              '2017': new Big('27081.23736'),
               max: new Big('26516.208701400000064086'),
               ytd: new Big('-556.443324')
             },
@@ -262,8 +264,8 @@ describe('PortfolioCalculator', () => {
         '2017': {
           date: '2017-12-31',
           netPerformance: 26957.033439,
-          netPerformanceInPercentage: 44.109822737327406,
-          netPerformanceInPercentageWithCurrencyEffect: 43.14859823223876,
+          netPerformanceInPercentage: 44.10965416175668,
+          netPerformanceInPercentageWithCurrencyEffect: 43.148434302822835,
           netPerformanceWithCurrencyEffect: 27081.23736,
           totalInvestmentValueWithCurrencyEffect: 318.54266729999995,
           valueWithCurrencyEffect: 13854.86868
@@ -271,8 +273,8 @@ describe('PortfolioCalculator', () => {
         max: {
           date: '2018-01-01',
           netPerformance: 26458.9121202,
-          netPerformanceInPercentage: 42.43911719562077,
-          netPerformanceInPercentageWithCurrencyEffect: 41.65910103572173,
+          netPerformanceInPercentage: 42.439117195620575,
+          netPerformanceInPercentageWithCurrencyEffect: 41.65910103572163,
           netPerformanceWithCurrencyEffect: 26516.2087014,
           totalInvestmentValueWithCurrencyEffect: 318.54266729999995,
           valueWithCurrencyEffect: 13298.425356
@@ -287,6 +289,17 @@ describe('PortfolioCalculator', () => {
           valueWithCurrencyEffect: 13298.425356
         }
       });
+
+      const { endDate, startDate } = getIntervalFromDateRange({
+        dateRange: '2017'
+      });
+
+      const { chart } = await portfolioCalculator.getPerformance({
+        end: endDate,
+        start: startDate
+      });
+
+      expect(chart[0].date).toBe('2016-12-31');
     });
 
     it.only('with BTCUSD buy and sell partially and fewer chart items', async () => {
@@ -333,21 +346,21 @@ describe('PortfolioCalculator', () => {
       // Other weights give another rounding of the floating point numbers
       expect(
         performanceByDateRange['2017'].netPerformanceInPercentage
-      ).toBeCloseTo(44.109822737327406, 10);
+      ).toBeCloseTo(44.10965416175668, 10);
 
       expect(
         performanceByDateRange['2017']
           .netPerformanceInPercentageWithCurrencyEffect
-      ).toBeCloseTo(43.14859823223876, 10);
+      ).toBeCloseTo(43.148434302822835, 10);
 
       expect(performanceByDateRange.max.netPerformanceInPercentage).toBeCloseTo(
-        42.43911719562077,
+        42.439117195620575,
         10
       );
 
       expect(
         performanceByDateRange.max.netPerformanceInPercentageWithCurrencyEffect
-      ).toBeCloseTo(41.65910103572173, 10);
+      ).toBeCloseTo(41.65910103572163, 10);
     });
   });
 });

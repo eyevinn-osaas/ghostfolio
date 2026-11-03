@@ -1,16 +1,17 @@
-import { ActivitiesService } from '@ghostfolio/api/app/activities/activities.service';
 import { HasPermission } from '@ghostfolio/api/decorators/has-permission.decorator';
 import { Impersonation } from '@ghostfolio/api/decorators/impersonation.decorator';
 import { RequiresScope } from '@ghostfolio/api/decorators/requires-scope.decorator';
 import {
   hasNotDefinedValuesInObject,
-  nullifyValuesInObject
+  nullifyValuesInObject,
+  nullifyValuesInObjects
 } from '@ghostfolio/api/helper/object.helper';
 import { convertValuesToPercentages } from '@ghostfolio/api/helper/portfolio.helper';
 import { PerformanceLoggingInterceptor } from '@ghostfolio/api/interceptors/performance-logging/performance-logging.interceptor';
 import { RedactValuesInResponseInterceptor } from '@ghostfolio/api/interceptors/redact-values-in-response/redact-values-in-response.interceptor';
 import { TransformDataSourceInRequestInterceptor } from '@ghostfolio/api/interceptors/transform-data-source-in-request/transform-data-source-in-request.interceptor';
 import { TransformDataSourceInResponseInterceptor } from '@ghostfolio/api/interceptors/transform-data-source-in-response/transform-data-source-in-response.interceptor';
+import { ActivitiesService } from '@ghostfolio/api/services/activities/activities.service';
 import { ApiService } from '@ghostfolio/api/services/api/api.service';
 import { ConfigurationService } from '@ghostfolio/api/services/configuration/configuration.service';
 import { getIntervalFromDateRange } from '@ghostfolio/common/calculation-helper';
@@ -495,6 +496,7 @@ export class PortfolioController {
       accounts,
       assetClasses,
       dataSource,
+      groupBy,
       range,
       symbol,
       tags,
@@ -511,6 +513,7 @@ export class PortfolioController {
 
     const performanceInformation = await this.portfolioService.getPerformance({
       filters,
+      groupBy,
       userId,
       withExcludedAccounts,
       dateRange: range
@@ -572,7 +575,8 @@ export class PortfolioController {
           'grossPerformanceWithCurrencyEffect',
           'netPerformance',
           'netPerformanceWithCurrencyEffect',
-          'totalInvestment'
+          'totalInvestment',
+          'totalInvestmentValueWithCurrencyEffect'
         ]
       );
     }
@@ -581,14 +585,22 @@ export class PortfolioController {
       this.configurationService.get('ENABLE_FEATURE_SUBSCRIPTION') &&
       this.request.user.subscription?.type === SubscriptionType.Basic
     ) {
-      performanceInformation.chart = performanceInformation.chart.map(
-        (item) => {
-          return nullifyValuesInObject(item, [
-            'dividendInBaseCurrency',
-            'totalInvestment',
-            'value'
-          ]);
-        }
+      performanceInformation.chart = nullifyValuesInObjects(
+        performanceInformation.chart,
+        [
+          'dividendInBaseCurrency',
+          'totalInvestment',
+          'value',
+          ...(groupBy === 'year'
+            ? [
+                'investmentValueWithCurrencyEffect',
+                'netPerformance',
+                'netPerformanceInPercentage',
+                'netPerformanceInPercentageWithCurrencyEffect',
+                'netPerformanceWithCurrencyEffect'
+              ]
+            : [])
+        ]
       );
       performanceInformation.performance = nullifyValuesInObject(
         performanceInformation.performance,

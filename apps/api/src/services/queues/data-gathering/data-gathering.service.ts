@@ -33,7 +33,15 @@ import { InjectQueue } from '@nestjs/bull';
 import { Inject, Injectable, Logger } from '@nestjs/common';
 import { Prisma } from '@prisma/client';
 import { Job, JobOptions, Queue } from 'bull';
-import { format, min, subDays, subMilliseconds, subYears } from 'date-fns';
+import {
+  format,
+  isBefore,
+  min,
+  subDays,
+  subMilliseconds,
+  subYears
+} from 'date-fns';
+import { isEmpty } from 'lodash-es';
 import ms, { StringValue } from 'ms';
 
 @Injectable()
@@ -170,17 +178,18 @@ export class DataGatheringService {
           update: {
             assetClass,
             assetSubClass,
-            countries,
             currency,
             cusip,
             figi,
             figiComposite,
             figiShareClass,
-            holdings,
             isin,
             name,
-            sectors,
-            url
+            url,
+            // Keep the stored data if no list is available
+            countries: isEmpty(countries) ? undefined : countries,
+            holdings: isEmpty(holdings) ? undefined : holdings,
+            sectors: isEmpty(sectors) ? undefined : sectors
           },
           where: {
             dataSource_symbol: {
@@ -297,8 +306,11 @@ export class DataGatheringService {
     dataSource,
     date,
     force = true,
+    removeOnComplete,
     symbol
-  }: DataGatheringItem) {
+  }: DataGatheringItem & {
+    removeOnComplete?: JobOptions['removeOnComplete'];
+  }) {
     const dataGatheringItems = (await this.getSymbolsMax())
       .filter((dataGatheringItem) => {
         return (
@@ -314,6 +326,7 @@ export class DataGatheringService {
     return this.gatherSymbols({
       dataGatheringItems,
       force,
+      removeOnComplete,
       priority: DATA_GATHERING_QUEUE_PRIORITY_HIGH
     });
   }
@@ -338,6 +351,10 @@ export class DataGatheringService {
         ]?.marketPrice;
 
       if (marketPrice) {
+        const state = isBefore(startOfUtcDate, getStartOfUtcDate(new Date()))
+          ? 'CLOSE'
+          : 'INTRADAY';
+
         return await this.prismaService.marketData.upsert({
           create: {
             dataSource,
@@ -346,7 +363,7 @@ export class DataGatheringService {
             date: startOfUtcDate,
             isCarriedForward: false
           },
-          update: { marketPrice, isCarriedForward: false },
+          update: { marketPrice, state, isCarriedForward: false },
           where: {
             dataSource_symbol_date: {
               dataSource,

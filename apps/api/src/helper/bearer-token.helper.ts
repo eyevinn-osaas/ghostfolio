@@ -1,3 +1,5 @@
+import { SubscriptionType } from '@ghostfolio/common/enums';
+import { hasScope, scopes } from '@ghostfolio/common/scopes';
 import type { RequestWithUser } from '@ghostfolio/common/types';
 
 const PREFIX_OF_BEARER_TOKEN = 'bearer ';
@@ -38,10 +40,28 @@ export function getActiveImpersonationOfBearerToken(
  * hence the transport lists only the tools which the access covers.
  */
 export function getMcpUserOfBearerToken(request: unknown) {
-  const impersonationOfBearerToken =
-    getActiveImpersonationOfBearerToken(request);
+  const impersonationOfBearerToken = getActiveImpersonationOfBearerToken(
+    request as Pick<RequestWithUser, 'impersonationOfBearerToken'>
+  );
 
   return impersonationOfBearerToken
     ? { scopes: impersonationOfBearerToken.scopes }
     : undefined;
+}
+
+/**
+ * Tells if the limits of the Basic subscription apply to the active access
+ * which the bearer token carries. The limits concern only value columns, hence
+ * they apply only to an access which reads the monetary values.
+ */
+export function hasLimitsOfBasicSubscriptionOfBearerToken(request: unknown) {
+  const impersonationOfBearerToken = getActiveImpersonationOfBearerToken(
+    request as Pick<RequestWithUser, 'impersonationOfBearerToken'>
+  );
+
+  return (
+    impersonationOfBearerToken?.userSubscription?.type ===
+      SubscriptionType.Basic &&
+    hasScope(impersonationOfBearerToken.scopes, scopes.portfolioReadValues)
+  );
 }

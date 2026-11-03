@@ -3,6 +3,7 @@ import { languageRedirectMiddleware } from '@ghostfolio/api/middlewares/language
 import { createMcpAuthorizationMiddleware } from '@ghostfolio/api/middlewares/mcp-authorization.middleware';
 import { ConfigurationService } from '@ghostfolio/api/services/configuration/configuration.service';
 import { ImpersonationService } from '@ghostfolio/api/services/impersonation/impersonation.service';
+import { UserService } from '@ghostfolio/api/services/user/user.service';
 import {
   BULL_BOARD_ROUTE,
   DEFAULT_HOST,
@@ -52,7 +53,7 @@ async function bootstrap() {
 
   try {
     customLogLevels = JSON.parse(
-      configService.get<string>('LOG_LEVELS')
+      configService.get<string>('LOG_LEVELS') ?? ''
     ) as LogLevel[];
   } catch {}
 
@@ -159,7 +160,11 @@ async function bootstrap() {
     // specification instead of an error of the protocol
     app.use(
       MCP_ENDPOINT,
-      createMcpAuthorizationMiddleware(app.get(ImpersonationService))
+      createMcpAuthorizationMiddleware({
+        configurationService,
+        impersonationService: app.get(ImpersonationService),
+        userService: app.get(UserService)
+      })
     );
 
     const mcpStrategy = app.get<McpStrategy>(MCP_STRATEGY);
@@ -186,7 +191,7 @@ async function bootstrap() {
 
     let address = app.getHttpServer().address();
 
-    if (typeof address === 'object') {
+    if (address && typeof address === 'object') {
       const addressObject = address;
       let host = addressObject.address;
 

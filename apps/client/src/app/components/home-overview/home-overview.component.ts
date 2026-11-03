@@ -36,6 +36,9 @@ import { takeUntilDestroyed } from '@angular/core/rxjs-interop';
 import { MatButtonModule } from '@angular/material/button';
 import { MatCardModule } from '@angular/material/card';
 import { Router, RouterModule } from '@angular/router';
+import { IonIcon } from '@ionic/angular/standalone';
+import { addIcons } from 'ionicons';
+import { arrowForwardOutline } from 'ionicons/icons';
 import { DeviceDetectorService } from 'ngx-device-detector';
 
 @Component({
@@ -44,6 +47,7 @@ import { DeviceDetectorService } from 'ngx-device-detector';
     GfHoldingsTableComponent,
     GfLineChartComponent,
     GfPortfolioPerformanceComponent,
+    IonIcon,
     MatButtonModule,
     MatCardModule,
     RouterModule
@@ -53,7 +57,6 @@ import { DeviceDetectorService } from 'ngx-device-detector';
   templateUrl: './home-overview.html'
 })
 export class GfHomeOverviewComponent implements OnInit {
-  protected readonly DEFAULT_LOCALE = DEFAULT_LOCALE;
   protected readonly errors = signal<AssetProfileIdentifier[]>([]);
   protected readonly hasImpersonationId = signal(false);
   protected readonly historicalDataItems = signal<LineChartItem[] | null>(null);
@@ -61,15 +64,26 @@ export class GfHomeOverviewComponent implements OnInit {
     undefined
   );
   protected readonly isLoadingPerformance = signal(true);
+
+  protected readonly locale = computed(() => {
+    return this.user()?.settings?.locale ?? DEFAULT_LOCALE;
+  });
+
   protected readonly performance = signal<PortfolioPerformance | null>(null);
   protected readonly performanceLabel = $localize`Performance`;
   protected readonly precision = signal(2);
   protected readonly user = signal<User | null>(null);
 
   protected readonly routerLinkAccounts = internalRoutes.accounts.routerLink;
+
+  protected readonly routerLinkHomeHoldings =
+    internalRoutes.home.subRoutes.holdings.routerLink;
+
   protected readonly routerLinkPortfolio = internalRoutes.portfolio.routerLink;
+
   protected readonly routerLinkPortfolioActivities =
     internalRoutes.portfolio.subRoutes.activities.routerLink;
+
   protected readonly routerLinkPortfolioActivitiesCreate =
     internalRoutes.portfolio.subRoutes.activities.subRoutes.create.routerLink;
 
@@ -102,11 +116,13 @@ export class GfHomeOverviewComponent implements OnInit {
   });
 
   protected readonly unit = computed(() => {
-    const user = this.user();
+    if (!this.showDetails()) {
+      return '%';
+    }
 
-    return this.showDetails()
-      ? (user?.settings?.baseCurrency ?? DEFAULT_CURRENCY)
-      : '%';
+    return this.deviceType() === 'mobile'
+      ? undefined
+      : (this.user()?.settings?.baseCurrency ?? DEFAULT_CURRENCY);
   });
 
   private readonly dataService = inject(DataService);
@@ -128,6 +144,8 @@ export class GfHomeOverviewComponent implements OnInit {
           this.update();
         }
       });
+
+    addIcons({ arrowForwardOutline });
   }
 
   public ngOnInit() {
@@ -147,7 +165,7 @@ export class GfHomeOverviewComponent implements OnInit {
 
   protected onHoldingClicked({ dataSource, symbol }: AssetProfileIdentifier) {
     if (dataSource && symbol) {
-      this.router.navigate([], {
+      void this.router.navigate([], {
         queryParams: { dataSource, symbol, holdingDetailDialog: true }
       });
     }

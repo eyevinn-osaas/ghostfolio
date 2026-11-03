@@ -3,6 +3,7 @@ import type {
   ProductPlatform,
   SectorName
 } from '@ghostfolio/common/types';
+import { RequestClient } from '@ghostfolio/prisma/enums';
 
 import '@angular/localize/init';
 
@@ -26,6 +27,7 @@ const locales = {
   HIGHER_RISK: $localize`Higher Risk`,
   IMPORT_ACTIVITY_ERROR_IS_DUPLICATE: $localize`This activity already exists.`,
   LOWER_RISK: $localize`Lower Risk`,
+  MANUAL: $localize`Manual`,
   MONTH: $localize`Month`,
   MONTHS: $localize`Months`,
   OTHER: $localize`Other`,
@@ -121,9 +123,15 @@ const locales = {
   LINUX: 'Linux',
   MACOS: 'macOS',
   WEB: $localize`Web`,
-  WINDOWS: 'Windows'
+  WINDOWS: 'Windows',
+
+  // Request clients (WEB is defined above under Product platforms)
+  API: 'API',
+  MCP: 'MCP',
+  SELF_HOSTING: $localize`Self-Hosting`
 } satisfies Record<ProductCategory, string> &
   Record<ProductPlatform, string> &
+  Record<RequestClient, string> &
   Record<SectorName, string> &
   Record<string, string>;
 
